@@ -1,0 +1,81 @@
+-- วางไว้ใน ServerScriptService ชื่อ GodModeServer
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- สร้าง RemoteEvent สำหรับรับคำสั่งเปิด-ปิดโหมดอมตะจาก UI
+local godModeEvent = ReplicatedStorage:FindFirstChild("ToggleGodModeEvent")
+if not godModeEvent then
+	godModeEvent = Instance.new("RemoteEvent")
+	godModeEvent.Name = "ToggleGodModeEvent"
+	godModeEvent.Parent = ReplicatedStorage
+end
+
+local activeGodPlayers: {[number]: boolean} = {}
+local healthConnections: {[number]: RBXScriptConnection} = {}
+
+local function canUseGodMode(player: Player): boolean
+	-- อนุญาตให้เจ้าของแมพใช้งานได้ (ถ้าอยากให้คนอื่นในทีมใช้ได้ด้วย สามารถเพิ่มเงื่อนไขตรงนี้ได้เลย)
+	if game.CreatorType == Enum.CreatorType.User and player.UserId == game.CreatorId then
+		return true
+	end
+	return false
+end
+
+local function clearConnection(userId: number)
+	if healthConnections[userId] then
+		healthConnections[userId]:Disconnect()
+		healthConnections[userId] = nil
+	end
+end
+
+local function setGodState(player: Player, enabled: boolean)
+	activeGodPlayers[player.UserId] = enabled
+	clearConnection(player.UserId)
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+
+	if enabled then
+		if humanoid then
+			humanoid.MaxHealth = math.huge
+			humanoid.Health = math.huge
+
+			healthConnections[player.UserId] = humanoid.HealthChanged:Connect(function(newHealth)
+				if activeGodPlayers[player.UserId] and newHealth < humanoid.MaxHealth then
+					humanoid.Health = humanoid.MaxHealth
+				end
+			end)
+		end
+	else
+		if humanoid and humanoid.MaxHealth == math.huge then
+			humanoid.MaxHealth = 100
+			humanoid.Health = 100
+		end
+	end
+end
+
+godModeEvent.OnServerEvent:Connect(function(player: Player, desiredState: boolean)
+	if not canUseGodMode(player) then
+		return
+	end
+	if typeof(desiredState) ~= "boolean" then
+		return
+	end
+	setGodState(player, desiredState)
+end)
+
+Players.PlayerAdded:Connect(function(player: Player)
+	activeGodPlayers[player.UserId] = false
+
+	player.CharacterAdded:Connect(function(character: Model)
+		if activeGodPlayers[player.UserId] then
+			task.wait(0.1)
+			setGodState(player, true)
+		end
+	end)
+end)
+
+Players.PlayerRemoving:Connect(function(player: Player)
+	activeGodPlayers[player.UserId] = nil
+	clearConnection(player.UserId)
+end)
